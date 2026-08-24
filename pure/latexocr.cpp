@@ -17,6 +17,7 @@
 #include "model.hpp"
 #include "optim.hpp"
 #include "tok.hpp"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -209,6 +210,16 @@ static int cmd_init(int argc, char** argv) {
   return 0;
 }
 
+// warmup してから cosine で落とす。transformer は**最初の数百 step が一番壊れやすい**
+// （注意の softmax が飽和したまま大きい step を踏むと戻ってこない）。頭を小さく入って、
+// 後半で細かく詰める。tools/train.py の lr_at と同じ式。
+static float lr_at(int step, int steps, float lr, float lr_min, int warmup) {
+  if (step < warmup) return lr * (float)(step + 1) / (float)(warmup > 0 ? warmup : 1);
+  const int span = steps - warmup > 0 ? steps - warmup : 1;
+  const double t = (double)(step - warmup) / (double)span;
+  return lr_min + 0.5f * (lr - lr_min) * (float)(1.0 + cos(3.14159265358979323846 * (t < 1.0 ? t : 1.0)));
+}
+
 static int cmd_train(int argc, char** argv) {
   const std::string data = arg_of(argc, argv, "--data", "");
   const std::string init = arg_of(argc, argv, "--init", "");
@@ -217,6 +228,8 @@ static int cmd_train(int argc, char** argv) {
   const int batch = std::atoi(arg_of(argc, argv, "--batch", "4").c_str());
   const int limit = std::atoi(arg_of(argc, argv, "--limit", "0").c_str());
   const float lr = (float)atof(arg_of(argc, argv, "--lr", "3e-4").c_str());
+  const float lr_min = (float)atof(arg_of(argc, argv, "--lr-min", "1e-5").c_str());
+  const int warmup = std::atoi(arg_of(argc, argv, "--warmup", "200").c_str());
   const float clip = (float)atof(arg_of(argc, argv, "--clip", "1.0").c_str());
   const uint64_t seed = strtoull(arg_of(argc, argv, "--seed", "1234").c_str(), nullptr, 10);
   const int log_every = std::atoi(arg_of(argc, argv, "--log-every", "10").c_str());
@@ -243,6 +256,7 @@ static int cmd_train(int argc, char** argv) {
   Adam opt(ps, lr, 0.9f, 0.999f, 1e-8f, 0.f, true);
   double first = 0, last = 0;
   for (int step = 0; step < steps; ++step) {
+    opt.lr = lr_at(step, steps, lr, lr_min, warmup);
     opt.zero_grad();
     double loss_sum = 0;
     int used = 0;
@@ -273,7 +287,7 @@ static int cmd_train(int argc, char** argv) {
     if (step == 0) first = l;
     last = l;
     if (log_every > 0 && (step % log_every == 0 || step == steps - 1))
-      printf("step %d: loss %.4f |g| %.2f\n", step, l, gn);
+      printf("step %d: loss %.4f |g| %.2f lr %.2e\n", step, l, gn, opt.lr);
     fflush(stdout);
   }
   printf("loss %.4f -> %.4f（%d step）\n", first, last, steps);
