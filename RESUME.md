@@ -10,9 +10,24 @@
 | Python 側: 学習 → 保存 → 推論 → 評価 | 通っている |
 | 両言語のパリティ（ロジット・損失・**重み 1 本ずつの勾配**・生成） | PASS |
 | 重みの受け渡し（C++ ⇄ Python、同じ `.pt`） | 両方向 PASS |
-| GPU 学習（Kaggle T4、kbridge 経由） | 30000 step ≈ 57 分で完了 |
+| GPU 学習（Kaggle T4、kbridge 経由） | 30000 step = 3388 秒（13.7 ms/サンプル） |
+| 見たことのない式 2000 件での完全一致 | **1975 / 2000（98.8%）** |
 | 本家 pix2tex の学習済みモデルを両言語で動かす | PASS（本家と 1 文字も違わない） |
-| WASM デモ（docs/） | 動いている |
+| WASM デモ（docs/） | 40 枚とも native と同じ読み・正解と一致 |
+
+最後に通したもの:
+
+```
+selftest              往復 500/500、勾配の方向微分 最悪 3.71e-03  PASS
+parity/model.py       ロジット 2.95e-07 / 損失 0 / 勾配 2.98e-06 / 生成一致  PASS
+parity/interchange.py C++ が書いた .pt 4/4、python が書いた .pt 4/4  PASS
+parity/pix2tex.py     試験画像 6 枚すべて C++ = python  PASS
+wasm/test_node.js     40 枚: 正解と 40/40、native と 40/40  ok
+```
+
+**GitHub Pages はまだ有効にしていない**（repo の Settings → Pages で
+「Deploy from a branch / main / docs」にすると <https://yomei-o.github.io/latex_ocr_cpp/>
+が出る）。`docs/` の中身はコミット済み。
 
 ## 決めたことと、その理由
 
