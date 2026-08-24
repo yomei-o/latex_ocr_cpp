@@ -11,3 +11,4 @@ models/*.bin
 *.pth
 *.pt
 data/
+fonts/

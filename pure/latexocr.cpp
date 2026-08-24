@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 #ifdef _WIN32
@@ -92,71 +93,6 @@ static int cmd_tok(int argc, char** argv) {
   return 0;
 }
 
-// 学習データを作る。images/%06d.png と labels.txt（1 行 = ファイル名 <TAB> LaTeX）
-static int cmd_gen(int argc, char** argv) {
-  const std::string out = arg_of(argc, argv, "--out", "");
-  const int n = std::atoi(arg_of(argc, argv, "--n", "1000").c_str());
-  const uint64_t seed = strtoull(arg_of(argc, argv, "--seed", "1").c_str(), nullptr, 10);
-  const std::string fontp = arg_of(argc, argv, "--font", "");
-  const bool no_images = has_flag(argc, argv, "--no-images");
-  if (out.empty()) {
-    printf("usage: latexocr gen --out data/train --n 2000 [--seed 1] [--font path.ttf]\n");
-    return 1;
-  }
-  mdl::Cfg mc = cfg_of(argc, argv);
-  dat::Cfg dc;
-  dc.W = mc.W;
-  dc.H = mc.H;
-  dc.max_len = mc.max_len;
-  std::string why;
-  ts::Font font;
-  if (!ts::load_font(font, fontp, &why)) { printf("%s\n", why.c_str()); return 1; }
-  ts::Style st;
-  st.italic_vars = false;
-  mkdir_p(out);
-  mkdir_p(out + "/images");
-  FILE* lab = fopen((out + "/labels.txt").c_str(), "wb");
-  if (!lab) { printf("%s/labels.txt が書けません\n", out.c_str()); return 1; }
-  Rng rng(seed);
-  int made = 0, tries = 0, longest = 0;
-  std::vector<unsigned char> png((size_t)dc.H * dc.W);
-  while (made < n && tries < n * 40) {
-    ++tries;
-    dat::Sample s;
-    if (!dat::make_one(font, nullptr, st, rng, dc, s)) continue;
-    if (s.len > longest) longest = s.len;
-    char name[64];
-    snprintf(name, sizeof name, "%06d.png", made);
-    if (!no_images) {
-      for (size_t i = 0; i < png.size(); ++i)
-        png[i] = (unsigned char)(255.0f - 255.0f * s.img[i]);       // 白地に黒字で保存
-      stbi_write_png((out + "/images/" + name).c_str(), dc.W, dc.H, 1, png.data(), dc.W);
-    }
-    fprintf(lab, "%s\t%s\n", name, s.latex.c_str());
-    ++made;
-  }
-  fclose(lab);
-  printf("%s に %d 件（試した回数 %d、最長 %d トークン、%dx%d）\n", out.c_str(), made, tries,
-         longest, dc.W, dc.H);
-  return 0;
-}
-
-static int cmd_init(int argc, char** argv) {
-  const std::string out = arg_of(argc, argv, "--out", "");
-  const uint64_t seed = strtoull(arg_of(argc, argv, "--seed", "1234").c_str(), nullptr, 10);
-  if (out.empty()) { printf("usage: latexocr init --out models/init.pt [--seed 1234]\n"); return 1; }
-  const mdl::Cfg c = cfg_of(argc, argv);
-  mdl::Params p;
-  mdl::build(p, c);
-  Rng rng(seed);
-  mdl::init_params(p, rng);
-  mkdir_p("models");
-  mdl::save(p, out);
-  printf("wrote %s: %zu tensor、%zu パラメータ（d %d, heads %d, layers %d, V %d）\n", out.c_str(),
-         p.order.size(), p.count(), c.d, c.heads, c.layers, c.V());
-  return 0;
-}
-
 // labels.txt を読む
 struct Item { std::string img; std::string latex; };
 static std::vector<Item> read_labels(const std::string& dir) {
@@ -189,6 +125,88 @@ static bool load_gray(const std::string& path, int H, int W, std::vector<float>&
       out[(size_t)y * W + x] = (255.f - im[(size_t)y * w + x]) / 255.f;
   stbi_image_free(im);
   return true;
+}
+
+// 学習データを作る。images/%06d.png と labels.txt（1 行 = ファイル名 <TAB> LaTeX）
+static int cmd_gen(int argc, char** argv) {
+  const std::string out = arg_of(argc, argv, "--out", "");
+  const int n = std::atoi(arg_of(argc, argv, "--n", "1000").c_str());
+  const uint64_t seed = strtoull(arg_of(argc, argv, "--seed", "1").c_str(), nullptr, 10);
+  const std::string fontp = arg_of(argc, argv, "--font", "");
+  const bool no_images = has_flag(argc, argv, "--no-images");
+  const std::string excl = arg_of(argc, argv, "--exclude", "");
+  const bool allow_dup = has_flag(argc, argv, "--allow-dup");
+  if (out.empty()) {
+    printf("usage: latexocr gen --out data/train --n 2000 [--seed 1] [--font path.ttf]\n");
+    printf("       [--exclude data/train] [--allow-dup]\n");
+    return 1;
+  }
+  mdl::Cfg mc = cfg_of(argc, argv);
+  dat::Cfg dc;
+  dc.W = mc.W;
+  dc.H = mc.H;
+  dc.max_len = mc.max_len;
+  std::string why;
+  ts::Font font;
+  if (!ts::load_font(font, fontp, &why)) { printf("%s\n", why.c_str()); return 1; }
+  ts::Style st;
+  st.italic_vars = false;
+  mkdir_p(out);
+  mkdir_p(out + "/images");
+  FILE* lab = fopen((out + "/labels.txt").c_str(), "wb");
+  if (!lab) { printf("%s/labels.txt が書けません\n", out.c_str()); return 1; }
+  // **同じ式を二度出さない**。式の作り方は木を振るだけなので、放っておくと短い式が
+  // 何度も出る（20000 件で重複を許すと中身は 14449 種類しかなかった）。学習の中身が
+  // 薄くなるうえ、val に train と同じ式が 33% 混ざって精度が水増しされる。
+  // --exclude で train の labels.txt を渡せば、val は train と 1 つも被らない。
+  std::set<std::string> seen;
+  int n_excl = 0;
+  if (!excl.empty()) {
+    for (const Item& it : read_labels(excl)) {
+      seen.insert(it.latex);
+      ++n_excl;
+    }
+    if (!n_excl) { printf("%s が読めません\n", excl.c_str()); return 1; }
+  }
+  Rng rng(seed);
+  int made = 0, tries = 0, longest = 0, dropped = 0;
+  std::vector<unsigned char> png((size_t)dc.H * dc.W);
+  while (made < n && tries < n * 40) {
+    ++tries;
+    dat::Sample s;
+    if (!dat::make_one(font, nullptr, st, rng, dc, s)) continue;
+    if (!allow_dup && !seen.insert(s.latex).second) { ++dropped; continue; }
+    if (s.len > longest) longest = s.len;
+    char name[64];
+    snprintf(name, sizeof name, "%06d.png", made);
+    if (!no_images) {
+      for (size_t i = 0; i < png.size(); ++i)
+        png[i] = (unsigned char)(255.0f - 255.0f * s.img[i]);       // 白地に黒字で保存
+      stbi_write_png((out + "/images/" + name).c_str(), dc.W, dc.H, 1, png.data(), dc.W);
+    }
+    fprintf(lab, "%s\t%s\n", name, s.latex.c_str());
+    ++made;
+  }
+  fclose(lab);
+  printf("%s に %d 件（試した回数 %d、重複で捨てた %d、除外リスト %d 件、最長 %d トークン、%dx%d）\n",
+         out.c_str(), made, tries, dropped, n_excl, longest, dc.W, dc.H);
+  return 0;
+}
+
+static int cmd_init(int argc, char** argv) {
+  const std::string out = arg_of(argc, argv, "--out", "");
+  const uint64_t seed = strtoull(arg_of(argc, argv, "--seed", "1234").c_str(), nullptr, 10);
+  if (out.empty()) { printf("usage: latexocr init --out models/init.pt [--seed 1234]\n"); return 1; }
+  const mdl::Cfg c = cfg_of(argc, argv);
+  mdl::Params p;
+  mdl::build(p, c);
+  Rng rng(seed);
+  mdl::init_params(p, rng);
+  mkdir_p("models");
+  mdl::save(p, out);
+  printf("wrote %s: %zu tensor、%zu パラメータ（d %d, heads %d, layers %d, V %d）\n", out.c_str(),
+         p.order.size(), p.count(), c.d, c.heads, c.layers, c.V());
+  return 0;
 }
 
 static int cmd_train(int argc, char** argv) {
