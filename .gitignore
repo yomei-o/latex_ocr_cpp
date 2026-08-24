@@ -1,0 +1,13 @@
+scratch/*
+!scratch/.gitkeep
+*.exe
+*.obj
+*.o
+__pycache__/
+*.pyc
+.venv/
+models/*.onnx
+models/*.bin
+*.pth
+*.pt
+data/
