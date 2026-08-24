@@ -30,6 +30,15 @@
 
 namespace mdl {
 
+// **LayerNorm の eps は torch の既定に合わせる**（1e-5）。engine の既定は 1e-6 だが、
+// 埋め込みの分散は 0.02^2 = 4e-4 しかないので、eps の差が 1/sqrt(v+eps) で 5e-3 動く
+// （実測: これを揃えるまで両言語のロジットが 3.6e-3 ずれていた）。
+inline constexpr float LN_EPS = 1e-5f;
+inline Tensor ln(const Tensor& x, const Tensor& g, const Tensor& b) {
+  return layernorm(x, g, b, LN_EPS);
+}
+
+
 struct Cfg {
   int H = 64, W = 256;        // 入力の帯
   int d = 128;                // 埋め込みの次元
@@ -203,21 +212,21 @@ inline Tensor decode(const Tensor& enc, const std::vector<int>& ids, const Param
   const Tensor mask = sq::causal_mask(T);
   for (int l = 0; l < c.layers; ++l) {
     const std::string q = "dec." + std::to_string(l) + ".";
-    const Tensor a = self_attn(layernorm(x, p.get(q + "ln1.w"), p.get(q + "ln1.b")),
+    const Tensor a = self_attn(ln(x, p.get(q + "ln1.w"), p.get(q + "ln1.b")),
                                p.get(q + "sa.qkv.w"), p.get(q + "sa.qkv.b"),
                                p.get(q + "sa.proj.w"), p.get(q + "sa.proj.b"), c.heads, mask);
     x = add(x, a);
-    const Tensor b = attn(layernorm(x, p.get(q + "ln2.w"), p.get(q + "ln2.b")), enc,
+    const Tensor b = attn(ln(x, p.get(q + "ln2.w"), p.get(q + "ln2.b")), enc,
                           p.get(q + "ca.q.w"), p.get(q + "ca.q.b"), p.get(q + "ca.kv.w"),
                           p.get(q + "ca.kv.b"), p.get(q + "ca.proj.w"), p.get(q + "ca.proj.b"),
                           c.heads, Tensor());
     x = add(x, b);
-    Tensor h = add_rowvec(matmul(layernorm(x, p.get(q + "ln3.w"), p.get(q + "ln3.b")),
+    Tensor h = add_rowvec(matmul(ln(x, p.get(q + "ln3.w"), p.get(q + "ln3.b")),
                                  p.get(q + "ff1.w")), p.get(q + "ff1.b"));
     h = add_rowvec(matmul(gelu(h), p.get(q + "ff2.w")), p.get(q + "ff2.b"));
     x = add(x, h);
   }
-  x = layernorm(x, p.get("dec.lnf.w"), p.get("dec.lnf.b"));
+  x = ln(x, p.get("dec.lnf.w"), p.get("dec.lnf.b"));
   return add_rowvec(matmul(x, p.get("head.w")), p.get("head.b"));
 }
 

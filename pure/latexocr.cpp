@@ -317,6 +317,69 @@ static int cmd_eval(int argc, char** argv) {
   return 0;
 }
 
+// パリティ用の書き出し。**Python に同じ数を渡す**のが目的なので、乱数で作ったものも
+// 計算した結果も全部入れる（重み・画像・入力トークン・正解・ロジット・損失・勾配・貪欲生成）。
+// これで違いが出たら、実装の違いである（乱数の引き方でも画像の作り方でもない）。
+static int cmd_dump_parity(int argc, char** argv) {
+  const std::string out = arg_of(argc, argv, "--out", "");
+  const uint64_t seed = strtoull(arg_of(argc, argv, "--seed", "5").c_str(), nullptr, 10);
+  if (out.empty()) { printf("usage: latexocr dump-parity --out scratch/parity.bin\n"); return 1; }
+  mdl::Cfg c = cfg_of(argc, argv);
+  if (!has_flag(argc, argv, "--full")) {              // 既定は小さい設定（速いので）
+    c.H = 32; c.W = 96; c.d = 24; c.heads = 3; c.layers = 2; c.ff = 32; c.max_len = 12;
+  }
+  c.vocab = tok::size();
+  mdl::Params p;
+  mdl::build(p, c);
+  Rng rng(seed);
+  mdl::init_params(p, rng);
+
+  std::vector<float> img((size_t)c.H * c.W);
+  for (float& v : img) v = (float)rng.unit();          // 中身は何でもよい（両言語で同じなら）
+  const std::vector<int> in_ids{tok::BOS, 32, 24, 5, 25};
+  const std::vector<int> tgt{32, 24, 5, 25, tok::EOS};
+  const int T = (int)in_ids.size();
+
+  std::vector<Tensor> ps = p.all();
+  for (Tensor& t : ps) std::fill(t->grad.begin(), t->grad.end(), 0.f);
+  const Tensor enc = mdl::encode(mdl::img_tensor(img, c), p, c);
+  const Tensor logits = mdl::decode(enc, in_ids, p, c);
+  std::vector<float> lg = logits->data;
+  const std::vector<float> mask((size_t)tgt.size(), 1.f);
+  const Tensor loss = sq::ce_loss(logits, tgt, mask);
+  const float lv = loss->data[0];
+  backward(loss);
+  free_graph(loss);
+  const std::vector<int> greedy = mdl::greedy(img, p, c);
+
+  FILE* f = fopen(out.c_str(), "wb");
+  if (!f) { printf("%s が書けません\n", out.c_str()); return 1; }
+  const auto wi = [&](int32_t v) { fwrite(&v, 4, 1, f); };
+  fwrite("LTXPAR01", 1, 8, f);
+  wi(c.H); wi(c.W); wi(c.d); wi(c.heads); wi(c.layers); wi(c.ff); wi(c.max_len); wi(c.V()); wi(T);
+  fwrite(img.data(), 4, img.size(), f);
+  for (int v : in_ids) wi(v);
+  for (int v : tgt) wi(v);
+  wi((int32_t)p.order.size());
+  for (const std::string& n : p.order) {
+    wi((int32_t)n.size());
+    fwrite(n.data(), 1, n.size(), f);
+    const Tensor t = p.t.at(n);
+    wi((int32_t)t->shape.size());
+    for (int64_t dd : t->shape) wi((int32_t)dd);
+    fwrite(t->data.data(), 4, t->data.size(), f);
+    fwrite(t->grad.data(), 4, t->grad.size(), f);
+  }
+  fwrite(lg.data(), 4, lg.size(), f);
+  fwrite(&lv, 4, 1, f);
+  wi((int32_t)greedy.size());
+  for (int v : greedy) wi(v);
+  fclose(f);
+  printf("wrote %s（重み %zu 本、ロジット %zu、損失 %.6f、貪欲生成 %zu トークン）\n", out.c_str(),
+         p.order.size(), lg.size(), lv, greedy.size());
+  return 0;
+}
+
 // トークナイザの往復と、勾配の検算
 static int cmd_selftest(int argc, char** argv) {
   const int n = std::atoi(arg_of(argc, argv, "--n", "500").c_str());
@@ -419,6 +482,7 @@ int main(int argc, char** argv) {
   if (cmd == "infer") return cmd_infer(argc, argv);
   if (cmd == "eval") return cmd_eval(argc, argv);
   if (cmd == "selftest") return cmd_selftest(argc, argv);
-  printf("usage: latexocr <vocab|tok|gen|init|train|infer|eval|selftest> ...\n");
+  if (cmd == "dump-parity") return cmd_dump_parity(argc, argv);
+  printf("usage: latexocr <vocab|tok|gen|init|train|infer|eval|selftest|dump-parity> ...\n");
   return 1;
 }
