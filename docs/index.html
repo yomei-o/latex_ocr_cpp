@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>latex_ocr_cpp — 数式の画像から LaTeX を読む</title>
+<style>
+  :root {
+    --bg: #12131a; --panel: #1b1d26; --line: #2c2f3d; --fg: #e6e8f0; --dim: #9aa0b4;
+    --ok: #6ee7a8; --ng: #ff8a8a; --accent: #7aa2ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", sans-serif;
+    line-height: 1.7;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--dim); font-weight: 600; }
+  .lead { color: var(--dim); margin: 0 0 28px; font-size: 14px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px; margin-bottom: 18px;
+  }
+  canvas {
+    width: 100%; max-width: 512px; height: auto; image-rendering: pixelated;
+    background: #fff; border-radius: 6px; display: block; margin: 10px 0;
+  }
+  button {
+    background: var(--accent); color: #0c1020; border: 0; border-radius: 6px;
+    padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=text] {
+    background: #0f1118; border: 1px solid var(--line); color: var(--fg);
+    border-radius: 6px; padding: 8px 10px; font-size: 14px; width: 100%;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .out {
+    font-family: ui-monospace, Consolas, monospace; font-size: 14px;
+    background: #0f1118; border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px 12px; margin-top: 10px; overflow-x: auto; white-space: pre;
+  }
+  .label { color: var(--dim); font-size: 12px; }
+  .ok { color: var(--ok); } .ng { color: var(--ng); }
+  footer { color: var(--dim); font-size: 13px; margin-top: 32px; }
+  a { color: var(--accent); }
+  code { font-family: ui-monospace, Consolas, monospace; background: #0f1118;
+         padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>数式の画像から LaTeX を読む</h1>
+  <p class="lead">
+    <a href="https://github.com/yomei-o/latex_ocr_cpp">latex_ocr_cpp</a> —
+    素の C++ で書いた LaTeX-OCR（CNN + transformer デコーダ）を WebAssembly にしたもの。
+    <b>学習も推論も、この 1 つのコードでやっている</b>（推論用に書き直したものではないので、
+    ここに出る文字列は <code>latexocr infer</code> と同じ）。
+    式を作るところ（組版）も同じ wasm に入っているので、サーバは要らない。
+  </p>
+
+  <div class="panel">
+    <h2>1. でたらめな式を出して読ませる</h2>
+    <div class="row">
+      <button id="b-sample" disabled>式を出す</button>
+      <span class="label" id="s-status">読み込み中…</span>
+    </div>
+    <canvas id="c-sample" width="256" height="64"></canvas>
+    <div class="label">正解</div><div class="out" id="s-truth">-</div>
+    <div class="label">読み</div><div class="out" id="s-read">-</div>
+  </div>
+
+  <div class="panel">
+    <h2>2. 自分で式を書く</h2>
+    <p class="label" style="margin:0 0 8px">
+      書き方は <code>frac(1,2)</code>、<code>sqrt(x+1)</code>、<code>x^2</code>、<code>3x - 7 = 2</code>。
+      LaTeX ではなくこの記法で入れる（組版と正解の LaTeX を同じ式から作るため）。
+    </p>
+    <div class="row">
+      <input type="text" id="t-src" value="frac(x+1,2) = sqrt(5)">
+      <button id="b-render" disabled>組んで読む</button>
+    </div>
+    <canvas id="c-render" width="256" height="64"></canvas>
+    <div class="label">組んだ式の LaTeX</div><div class="out" id="r-truth">-</div>
+    <div class="label">読み</div><div class="out" id="r-read">-</div>
+  </div>
+
+  <div class="panel">
+    <h2>3. 画像を読ませる</h2>
+    <p class="label" style="margin:0 0 8px">
+      白地に黒字の数式画像。学習と同じやり方で 256x64 の帯に収めてから読む。
+      <b>学習データと見た目が違う式は読めない</b>（この小さいモデルは合成データだけで
+      学習してある）。実物の論文の式を読ませるなら、README にある本家の学習済みモデルを
+      CLI で使う。
+    </p>
+    <div class="row">
+      <input type="file" id="f-img" accept="image/*">
+    </div>
+    <canvas id="c-up" width="256" height="64"></canvas>
+    <div class="label">読み</div><div class="out" id="u-read">-</div>
+  </div>
+
+  <footer>
+    モデル: 55 万パラメータ（d=128, 4 heads, デコーダ 2 段、語彙 82）。
+    学習は 30000 件の合成データ。見たことのない式での完全一致は README に記載。
+  </footer>
+</main>
+
+<script src="latexocr.js"></script>
+<script>
+let M = null, W = 0, H = 0, buf = 0, seed = 1;
+
+function show(canvasId, gray) {
+  const cv = document.getElementById(canvasId);
+  const ctx = cv.getContext('2d');
+  const im = ctx.createImageData(W, H);
+  for (let i = 0; i < W * H; ++i) {
+    im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = gray[i];
+    im.data[4 * i + 3] = 255;
+  }
+  ctx.putImageData(im, 0, 0);
+}
+
+function readBuf() {
+  return M.ccall('lx_read', 'string', ['number'], [buf]);
+}
+
+createLatexOCR().then((mod) => {
+  M = mod;
+  const rc = M.ccall('lx_init', 'number', ['string', 'string'],
+                     ['fonts/math.ttf', 'models/model.pt']);
+  const st = document.getElementById('s-status');
+  if (rc !== 0) {
+    st.textContent = '読み込めません: ' + M.ccall('lx_why', 'string', [], []);
+    return;
+  }
+  W = M.ccall('lx_w', 'number', [], []);
+  H = M.ccall('lx_h', 'number', [], []);
+  buf = M._malloc(W * H);
+  st.textContent = W + 'x' + H + ' で読む';
+  document.getElementById('b-sample').disabled = false;
+  document.getElementById('b-render').disabled = false;
+  document.getElementById('b-sample').click();
+});
+
+document.getElementById('b-sample').addEventListener('click', () => {
+  if (!M) return;
+  if (!M.ccall('lx_sample', 'number', ['number', 'number'], [seed++, buf])) return;
+  const truth = M.ccall('lx_why', 'string', [], []);
+  show('c-sample', M.HEAPU8.subarray(buf, buf + W * H));
+  const got = readBuf();
+  document.getElementById('s-truth').textContent = truth;
+  const r = document.getElementById('s-read');
+  r.textContent = got;
+  r.className = 'out ' + (got.replace(/\s/g, '') === truth.replace(/\s/g, '') ? 'ok' : 'ng');
+});
+
+document.getElementById('b-render').addEventListener('click', () => {
+  if (!M) return;
+  const src = document.getElementById('t-src').value;
+  const ok = M.ccall('lx_render', 'number', ['string', 'number', 'number'], [src, 32, buf]);
+  const why = M.ccall('lx_why', 'string', [], []);
+  if (!ok) {
+    document.getElementById('r-truth').textContent = why;
+    document.getElementById('r-read').textContent = '-';
+    return;
+  }
+  show('c-render', M.HEAPU8.subarray(buf, buf + W * H));
+  const got = readBuf();
+  document.getElementById('r-truth').textContent = why;
+  const r = document.getElementById('r-read');
+  r.textContent = got;
+  r.className = 'out ' + (got.replace(/\s/g, '') === why.replace(/\s/g, '') ? 'ok' : 'ng');
+});
+
+document.getElementById('f-img').addEventListener('change', (ev) => {
+  const file = ev.target.files[0];
+  if (!file || !M) return;
+  const img = new Image();
+  img.onload = () => {
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    const n = cv.width * cv.height;
+    const src = M._malloc(n);
+    for (let i = 0; i < n; ++i)                       // 輝度（PIL の L と同じ重み）
+      M.HEAPU8[src + i] = (d[4 * i] * 299 + d[4 * i + 1] * 587 + d[4 * i + 2] * 114) / 1000 | 0;
+    const ok = M.ccall('lx_fit', 'number', ['number', 'number', 'number', 'number'],
+                       [src, cv.width, cv.height, buf]);
+    M._free(src);
+    if (!ok) return;
+    show('c-up', M.HEAPU8.subarray(buf, buf + W * H));
+    document.getElementById('u-read').textContent = readBuf();
+  };
+  img.src = URL.createObjectURL(file);
+});
+</script>
+</body>
+</html>

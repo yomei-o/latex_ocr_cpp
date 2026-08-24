@@ -25,7 +25,7 @@ mkdir -p docs
 python "$EMCC" -std=c++20 -O3 -Ipure -Ipure/third_party \
   -s MODULARIZE=1 -s EXPORT_NAME=createLatexOCR -s ALLOW_MEMORY_GROWTH=1 \
   -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","HEAPU8"]' \
-  -s EXPORTED_FUNCTIONS='["_malloc","_free","_lx_w","_lx_h","_lx_ready","_lx_init","_lx_why","_lx_render","_lx_sample","_lx_read"]' \
+  -s EXPORTED_FUNCTIONS='["_malloc","_free","_lx_w","_lx_h","_lx_ready","_lx_init","_lx_why","_lx_render","_lx_sample","_lx_fit","_lx_read"]' \
   --preload-file "$FONT@fonts/math.ttf" --preload-file "$MODEL@models/model.pt" \
   $EXTRA wasm/latexocr_wasm.cpp -o "$OUT"
 ls -l "${OUT%.js}".* "${OUT%.js}.data" 2>/dev/null || true

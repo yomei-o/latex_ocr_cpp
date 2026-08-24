@@ -92,6 +92,22 @@ EMSCRIPTEN_KEEPALIVE int lx_sample(unsigned int seed, unsigned char* out) {
   return 0;
 }
 
+// 好きな大きさのグレイ画像（0 = 黒、白地）を、学習時と**同じやり方で**帯に収める。
+// JS 側で縮めると縮め方が違ってしまう（学習は面積平均で縮め、拡大はしない）ので、
+// ここでやる。out は W*H。
+EMSCRIPTEN_KEEPALIVE int lx_fit(const unsigned char* gray, int w, int h, unsigned char* out) {
+  if (!g_ready || w <= 0 || h <= 0) return 0;
+  ts::Rendered r;
+  r.w = w;
+  r.h = h;
+  r.gray.assign(gray, gray + (size_t)w * h);
+  std::vector<float> img;
+  dat::fit_into(r, data_cfg(), img);
+  for (size_t i = 0; i < img.size(); ++i)
+    out[i] = (unsigned char)(255.f - 255.f * img[i]);
+  return 1;
+}
+
 // W*H のグレイ画像（0 = 黒）を読んで LaTeX を返す。
 EMSCRIPTEN_KEEPALIVE const char* lx_read(const unsigned char* gray) {
   static std::string r;

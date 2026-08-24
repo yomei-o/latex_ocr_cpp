@@ -4,7 +4,7 @@
 // latexocr.exe infer が読んだ LaTeX が 1 文字も違わないこと。ここが合っていれば、
 // デモページで見えているものは native と同じ推論である。
 //
-//   node wasm/test_node.js [枚数]
+//   node wasm/test_node.js [枚数] [native と比べる .pt（既定 models/best.pt）]
 //
 // 手順: lx_sample ででたらめな式を作り（正解つき）、それを png に書き出して
 // latexocr.exe にも読ませ、両者を突き合わせる。
@@ -52,7 +52,8 @@ function writeGrayPng(file, w, h, gray) {
     chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]));
 }
 
-createLatexOCR().then((M) => {
+// .data はこの js の隣にある（どこから起動しても効くように場所を教える）
+createLatexOCR({ locateFile: (p) => path.join(ROOT, 'docs', p) }).then((M) => {
   const rc = M.ccall('lx_init', 'number', ['string', 'string'], ['fonts/math.ttf', 'models/model.pt']);
   if (rc !== 0) {
     console.error('lx_init 失敗:', M.ccall('lx_why', 'string', [], []));
@@ -62,7 +63,8 @@ createLatexOCR().then((M) => {
   const H = M.ccall('lx_h', 'number', [], []);
   const buf = M._malloc(W * H);
   const exe = path.join(ROOT, process.platform === 'win32' ? 'latexocr.exe' : 'latexocr.exe');
-  const model = path.join(ROOT, 'models', 'wasm_check.pt');
+  const model = process.argv[3] ? path.resolve(ROOT, process.argv[3])
+                              : path.join(ROOT, 'models', 'best.pt');
   const tmp = path.join(ROOT, 'scratch', 'wasm_check.png');
   fs.mkdirSync(path.join(ROOT, 'scratch'), { recursive: true });
 
@@ -82,12 +84,14 @@ createLatexOCR().then((M) => {
       else if (okNative + 3 > n) console.log('  ちがう\n    wasm   %s\n    native %s', got, out);
     }
   }
-  console.log('%d 枚: wasm が正解と一致 %d (%.0f%%)', n, okTruth, 100 * okTruth / n);
+  console.log(n + ' 枚: wasm が正解と一致 ' + okTruth +
+              ' (' + (100 * okTruth / n).toFixed(1) + '%)');
   if (nativeRan) {
-    console.log('       wasm と native が一致 %d/%d  %s', okNative, n, okNative === n ? 'ok' : 'NG');
+    console.log('       wasm と native が一致 ' + okNative + '/' + n +
+                '  ' + (okNative === n ? 'ok' : 'NG'));
     process.exit(okNative === n ? 0 : 1);
   } else {
-    console.log('       native との突き合わせは飛ばした（%s か %s が無い）', exe, model);
+    console.log('       native との突き合わせは飛ばした（' + exe + ' か ' + model + ' が無い）');
   }
   M._free(buf);
 });
