@@ -13,7 +13,7 @@
 | GPU 学習（Kaggle T4、kbridge 経由） | 30000 step = 3388 秒（13.7 ms/サンプル） |
 | 見たことのない式 2000 件での完全一致 | **1975 / 2000（98.8%）** |
 | 本家 pix2tex の学習済みモデルを両言語で動かす | PASS（本家と 1 文字も違わない） |
-| WASM デモ（docs/） | 40 枚とも native と同じ読み・正解と一致 |
+| WASM デモ（wasm/） | 40 枚とも native と同じ読み・正解と一致 |
 
 最後に通したもの:
 
@@ -25,9 +25,8 @@ parity/pix2tex.py     試験画像 6 枚すべて C++ = python  PASS
 wasm/test_node.js     40 枚: 正解と 40/40、native と 40/40  ok
 ```
 
-**GitHub Pages はまだ有効にしていない**（repo の Settings → Pages で
-「Deploy from a branch / main / docs」にすると <https://yomei-o.github.io/latex_ocr_cpp/>
-が出る）。`docs/` の中身はコミット済み。
+公開先は <https://yomei-o.github.io/latex_ocr_cpp/wasm/>（Pages はルート配信で、
+`/` には README が Jekyll で出る）。姉妹リポジトリと同じ形。
 
 ## 決めたことと、その理由
 

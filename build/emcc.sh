@@ -2,7 +2,7 @@
 # ブラウザ用のビルド。emsdk はこの機械では C:\prog\emsdk\emsdk（EMSDK= で変えられる）。
 # 初回だけ `cd $EMSDK && ./emsdk install latest && ./emsdk activate latest`。
 #
-#   sh build/emcc.sh                       # models/best.pt を焼き込む
+#   sh build/emcc.sh                       # models/best.pt を焼き込んで wasm/ に出す
 #   MODEL=models/other.pt sh build/emcc.sh
 #
 # フォントと重みは --preload-file で MEMFS に入れる。こうすると pure/ 側の
@@ -17,10 +17,9 @@ export EM_CONFIG="$EMSDK/.emscripten"
 
 MODEL="${MODEL:-models/best.pt}"
 FONT="${FONT:-fonts/math.ttf}"
-OUT="${OUT:-docs/latexocr.js}"
+OUT="${OUT:-wasm/latexocr.js}"
 [ -f "$MODEL" ] || { echo "$MODEL が無い（sh build/get_model.sh か、学習して --export）"; exit 1; }
 [ -f "$FONT" ] || { echo "$FONT が無い（sh build/get_fonts.sh）"; exit 1; }
-mkdir -p docs
 
 python "$EMCC" -std=c++20 -O3 -Ipure -Ipure/third_party \
   -s MODULARIZE=1 -s EXPORT_NAME=createLatexOCR -s ALLOW_MEMORY_GROWTH=1 \

@@ -1,6 +1,6 @@
 // ブラウザに出す前に、wasm を node で動かして確かめる。
 //
-// **確かめるのは「同じ答えが出るか」**。docs/ の wasm が読んだ LaTeX と、
+// **確かめるのは「同じ答えが出るか」**。wasm/ の wasm が読んだ LaTeX と、
 // latexocr.exe infer が読んだ LaTeX が 1 文字も違わないこと。ここが合っていれば、
 // デモページで見えているものは native と同じ推論である。
 //
@@ -14,7 +14,7 @@ const { execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const N = parseInt(process.argv[2] || '20', 10);
-const createLatexOCR = require(path.join(ROOT, 'docs', 'latexocr.js'));
+const createLatexOCR = require(path.join(__dirname, 'latexocr.js'));
 
 // 最小の png 書き出し（学習にも推論にも使わないので、ここだけで完結させる）
 function writeGrayPng(file, w, h, gray) {
@@ -53,7 +53,7 @@ function writeGrayPng(file, w, h, gray) {
 }
 
 // .data はこの js の隣にある（どこから起動しても効くように場所を教える）
-createLatexOCR({ locateFile: (p) => path.join(ROOT, 'docs', p) }).then((M) => {
+createLatexOCR({ locateFile: (p) => path.join(__dirname, p) }).then((M) => {
   const rc = M.ccall('lx_init', 'number', ['string', 'string'], ['fonts/math.ttf', 'models/model.pt']);
   if (rc !== 0) {
     console.error('lx_init 失敗:', M.ccall('lx_why', 'string', [], []));

@@ -2,7 +2,7 @@
 
 数式の画像を入れると LaTeX が出る。**同じことを C++ でも Python でもできる**ようにしてあり、
 どちらで学習した重みも、もう片方がそのまま読む。C++ 側は標準ライブラリだけ（外の
-ライブラリを使わない自前の autograd）。ブラウザ用の [デモページ](https://yomei-o.github.io/latex_ocr_cpp/)
+ライブラリを使わない自前の autograd）。ブラウザ用の [デモページ](https://yomei-o.github.io/latex_ocr_cpp/wasm/)
 も同じコードを WebAssembly にしたもの。
 
 入っているものは 2 つある。**別のものなので混ぜないこと**:
@@ -179,7 +179,7 @@ tools/           Python（PyTorch）
   bpe.py           pure/bpe.hpp の鏡
   parity/          両言語を縛るテスト
 
-wasm/            ブラウザ用（docs/ に出る）
+wasm/            ブラウザ用（ここに出て、そのまま GitHub Pages で公開される）
 build/           ビルドと取得のスクリプト
 ```
 
