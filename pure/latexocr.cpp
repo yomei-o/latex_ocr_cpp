@@ -6,6 +6,7 @@
 //   latexocr init --out models/init.pt            重みを初期化して書き出す
 //   latexocr train --data data/train --steps 200  学習する
 //   latexocr infer --img x.png --model m.pt       1 枚読む
+//   latexocr pix2tex --img x.png                  本家の学習済みモデルで読む
 //   latexocr selftest                             トークナイザの往復と勾配の検算
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -17,6 +18,8 @@
 #include "model.hpp"
 #include "optim.hpp"
 #include "tok.hpp"
+#include "bpe.hpp"
+#include "pix2tex.hpp"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -129,6 +132,25 @@ static bool load_gray(const std::string& path, int H, int W, std::vector<float>&
 }
 
 // 学習データを作る。images/%06d.png と labels.txt（1 行 = ファイル名 <TAB> LaTeX）
+// 画像を 8bit グレイで読む。**透過つきの png は alpha のほうに字が入っている**ので、
+// alpha が一定でないならそちらを使う（本家 utils.pad の convert('LA') と同じ判断）。
+static bool load_img(const std::string& path, ip::Img& out) {
+  int w = 0, h = 0, ch = 0;
+  unsigned char* d = stbi_load(path.c_str(), &w, &h, &ch, 2);
+  if (!d) return false;
+  out.w = w;
+  out.h = h;
+  out.p.assign((size_t)w * h, 255);
+  bool alpha_varies = false;
+  const unsigned char a0 = d[1];
+  for (size_t i = 0; i < (size_t)w * h; ++i)
+    if (d[2 * i + 1] != a0) { alpha_varies = true; break; }
+  for (size_t i = 0; i < (size_t)w * h; ++i)
+    out.p[i] = alpha_varies ? (unsigned char)(255 - d[2 * i + 1]) : d[2 * i];
+  stbi_image_free(d);
+  return true;
+}
+
 static int cmd_gen(int argc, char** argv) {
   const std::string out = arg_of(argc, argv, "--out", "");
   const int n = std::atoi(arg_of(argc, argv, "--n", "1000").c_str());
@@ -349,6 +371,47 @@ static int cmd_eval(int argc, char** argv) {
   return 0;
 }
 
+// 本家 LaTeX-OCR（pix2tex）の学習済みモデルで読む。
+//
+// この repo で学習するモデル（pure/model.hpp）とは別物で、こちらは**重みを借りるだけ**。
+// 25.5M パラメータ・語彙 1175 の byte-level BPE で、実物の論文の式が読める。
+// 手順も本家に合わせてある（前処理 -> image_resizer で大きさを決める -> 貪欲に読む）。
+static int cmd_pix2tex(int argc, char** argv) {
+  const std::string img_p = arg_of(argc, argv, "--img", "");
+  const std::string wp = arg_of(argc, argv, "--weights", "models/pix2tex/weights.pth");
+  const std::string rp = arg_of(argc, argv, "--resizer", "models/pix2tex/image_resizer.pth");
+  const std::string tp = arg_of(argc, argv, "--tokenizer", "models/pix2tex/tokenizer.json");
+  const int max_new = std::atoi(arg_of(argc, argv, "--max-new", "256").c_str());
+  const bool no_resize = has_flag(argc, argv, "--no-resize");
+  const bool raw = has_flag(argc, argv, "--raw");
+  if (img_p.empty()) {
+    printf("usage: latexocr pix2tex --img formula.png [--weights models/pix2tex/weights.pth]\n"
+           "                        [--resizer ...] [--tokenizer ...] [--no-resize] [--raw]\n");
+    return 1;
+  }
+  ip::Img src;
+  if (!load_img(img_p, src)) { printf("%s が読めません\n", img_p.c_str()); return 1; }
+  px::Cfg c;
+  px::Weights w;
+  std::string why;
+  if (!w.load(wp, &why)) { printf("%s\n", why.c_str()); return 1; }
+  px::Weights rz;
+  bool has_rz = false;
+  if (!no_resize) {
+    FILE* f = fopen(rp.c_str(), "rb");
+    if (f) { fclose(f); has_rz = rz.load(rp, &why); }
+    if (!has_rz) printf("（%s が無いので大きさは決め打ち。読みは落ちる）\n", rp.c_str());
+  }
+  bpe::Tokenizer tk;
+  if (!tk.load(tp, &why)) { printf("%s\n", why.c_str()); return 1; }
+  ip::Img used;
+  const std::vector<int> ids = px::read(src, w, c, has_rz ? &rz : nullptr, max_new, &used);
+  printf("入力 %dx%d\n", used.w, used.h);
+  const std::string latex = tk.decode(ids);
+  printf("%s\n", raw ? latex.c_str() : bpe::post_process(latex).c_str());
+  return 0;
+}
+
 // パリティ用の書き出し。**Python に同じ数を渡す**のが目的なので、乱数で作ったものも
 // 計算した結果も全部入れる（重み・画像・入力トークン・正解・ロジット・損失・勾配・貪欲生成）。
 // これで違いが出たら、実装の違いである（乱数の引き方でも画像の作り方でもない）。
@@ -515,6 +578,7 @@ int main(int argc, char** argv) {
   if (cmd == "eval") return cmd_eval(argc, argv);
   if (cmd == "selftest") return cmd_selftest(argc, argv);
   if (cmd == "dump-parity") return cmd_dump_parity(argc, argv);
-  printf("usage: latexocr <vocab|tok|gen|init|train|infer|eval|selftest|dump-parity> ...\n");
+  if (cmd == "pix2tex") return cmd_pix2tex(argc, argv);
+  printf("usage: latexocr <vocab|tok|gen|init|train|infer|eval|selftest|dump-parity|pix2tex> ...\n");
   return 1;
 }

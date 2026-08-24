@@ -12,3 +12,4 @@ models/*.bin
 *.pt
 data/
 fonts/
+models/pix2tex/

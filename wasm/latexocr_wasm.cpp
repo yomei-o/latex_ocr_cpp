@@ -60,17 +60,19 @@ EMSCRIPTEN_KEEPALIVE int lx_init(const char* font_path, const char* model_path) 
 
 EMSCRIPTEN_KEEPALIVE const char* lx_why() { return g_out.c_str(); }
 
-// LaTeX を組んで W*H のグレイ画像にする（0 = 黒、255 = 白）。組めなければ 0。
-EMSCRIPTEN_KEEPALIVE int lx_render(const char* latex, unsigned char* out) {
+// 式（`frac(1,2) + sqrt(x)` の書き方）を組んで W*H のグレイ画像にする（0 = 黒、255 = 白）。
+// 組めなければ 0。組めたら、その式の LaTeX が lx_why で取れる。
+EMSCRIPTEN_KEEPALIVE int lx_render(const char* src, int px, unsigned char* out) {
   if (!g_ready) return 0;
-  std::string why;
-  const ex::E e = ex::parse(latex, &why);
-  if (!why.empty()) { g_out = why; return 0; }
   std::vector<float> img;
-  const dat::Cfg dc = data_cfg();
-  if (!dat::render_latex(g_font, nullptr, g_style, ex::to_latex(e), dc, img)) return 0;
+  std::string latex;
+  if (!dat::render_src(g_font, nullptr, g_style, src, data_cfg(), px, img, latex)) {
+    g_out = "式として読めません";
+    return 0;
+  }
   for (size_t i = 0; i < img.size(); ++i)
     out[i] = (unsigned char)(255.f - 255.f * img[i]);
+  g_out = latex;
   return 1;
 }
 

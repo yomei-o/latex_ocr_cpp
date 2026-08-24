@@ -62,6 +62,22 @@ inline void fit_into(const ts::Rendered& r, const Cfg& c, std::vector<float>& ou
     }
 }
 
+// 式を 1 つ組んで帯に収める（gen_expr が出すのと同じ記法。`frac(1,2) + sqrt(x)`）。
+// latex にはその式の LaTeX が入る。**画像と LaTeX は同じ木から作る**ので食い違わない。
+// 学習データは make_one が作るが、絵の作り方（fit_into）はこちらと同じ。
+inline bool render_src(const ts::Font& font, const ts::Font* font_i, const ts::Style& st,
+                       const std::string& src, const Cfg& c, int px, std::vector<float>& img,
+                       std::string& latex) {
+  std::string why;
+  const ex::E e = ex::parse(src, &why);
+  if (!why.empty()) return false;
+  latex = ex::to_latex(e);
+  const ts::Rendered r = ts::render(font, font_i, e, px, st);
+  if (r.w <= 0 || r.h <= 0) return false;
+  fit_into(r, c, img);
+  return true;
+}
+
 // 1 件作る。作れなければ ok=false（式が解析できない・トークンが語彙に無い・長すぎる）
 inline bool make_one(const ts::Font& font, const ts::Font* font_i, const ts::Style& st, Rng& rng,
                      const Cfg& c, Sample& out) {
