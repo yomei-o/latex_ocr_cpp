@@ -72,7 +72,9 @@ EMSCRIPTEN_KEEPALIVE int lx_render(const char* src, int px, unsigned char* out) 
   }
   for (size_t i = 0; i < img.size(); ++i)
     out[i] = (unsigned char)(255.f - 255.f * img[i]);
-  g_out = latex;
+  // **トークンに割って戻した形**を返す（生の LaTeX と読みを比べると、空白の入り方が
+  // 違うだけで「外れ」に見える。モデルが出せるのはトークン列なので、そちらに揃える）
+  g_out = tok::decode(tok::encode(latex));
   return 1;
 }
 
@@ -86,7 +88,7 @@ EMSCRIPTEN_KEEPALIVE int lx_sample(unsigned int seed, unsigned char* out) {
     if (!dat::make_one(g_font, nullptr, g_style, rng, dc, s)) continue;
     for (size_t k = 0; k < s.img.size(); ++k)
       out[k] = (unsigned char)(255.f - 255.f * s.img[k]);
-    g_out = s.latex;
+    g_out = tok::decode(tok::encode(s.latex));
     return 1;
   }
   return 0;
